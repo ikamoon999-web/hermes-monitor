@@ -1,0 +1,49 @@
+name: Hermès Stock Monitor
+
+on:
+  schedule:
+    # Every 10 minutes (GitHub Actions minimum is 5 min)
+    # Note: for private repos, use */30 to stay within the 2,000 min/month free tier
+    - cron: "*/10 * * * *"
+  workflow_dispatch:   # Manual trigger from GitHub UI
+
+# Only one run at a time — prevent overlapping jobs
+concurrency:
+  group: hermes-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    permissions:
+      contents: write   # Required to commit state.json back to the repo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run monitor
+        env:
+          TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          # Only commit if state actually changed
+          git diff --staged --quiet || git commit -m "chore: update stock state [skip ci]"
+          git push

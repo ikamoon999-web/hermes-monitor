@@ -1,0 +1,28 @@
+[
+  {"id": "GP30-NAT", "name": "ガーデンパーティー 30", "size": "30", "color": "ナチュラル",   "price": 187000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/garden-party-bag-30-H090184CK03/"},
+  {"id": "GP30-NOI", "name": "ガーデンパーティー 30", "size": "30", "color": "ノワール",     "price": 187000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/garden-party-bag-30-H090184CK89/"},
+  {"id": "GP30-RGH", "name": "ガーデンパーティー 30", "size": "30", "color": "ルージュ H",   "price": 187000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/garden-party-bag-30-H090184CK18/"},
+  {"id": "GP30-BLU", "name": "ガーデンパーティー 30", "size": "30", "color": "ブルー・アンダルー", "price": 187000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/garden-party-bag-30-H090184CK37/"},
+  {"id": "GP30-VRT", "name": "ガーデンパーティー 30", "size": "30", "color": "ヴェール・フォンセ", "price": 187000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/garden-party-bag-30-H090184CK64/"},
+
+  {"id": "GP36-NAT", "name": "ガーデンパーティー 36", "size": "36", "color": "ナチュラル",   "price": 215000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/garden-party-bag-36-H090185CK03/"},
+  {"id": "GP36-NOI", "name": "ガーデンパーティー 36", "size": "36", "color": "ノワール",     "price": 215000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/garden-party-bag-36-H090185CK89/"},
+  {"id": "GP36-BLU", "name": "ガーデンパーティー 36", "size": "36", "color": "ブルー・アンダルー", "price": 215000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/garden-party-bag-36-H090185CK37/"},
+  {"id": "GP36-BRD", "name": "ガーデンパーティー 36", "size": "36", "color": "ボルドー",     "price": 215000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/garden-party-bag-36-H090185CK32/"},
+
+  {"id": "GP42-NAT", "name": "ガーデンパーティー 42", "size": "42", "color": "ナチュラル",   "price": 236000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/garden-party-bag-42-H090186CK03/"},
+  {"id": "GP42-NOI", "name": "ガーデンパーティー 42", "size": "42", "color": "ノワール",     "price": 236000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/garden-party-bag-42-H090186CK89/"},
+
+  {"id": "PL18-NAT", "name": "ピコタン・ロック 18", "size": "18", "color": "ナチュラル",   "price": 242000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/picotin-lock-18-bag-H056289CK03/"},
+  {"id": "PL18-NOI", "name": "ピコタン・ロック 18", "size": "18", "color": "ノワール",     "price": 242000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/picotin-lock-18-bag-H056289CK89/"},
+  {"id": "PL18-RGH", "name": "ピコタン・ロック 18", "size": "18", "color": "ルージュ H",   "price": 242000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/picotin-lock-18-bag-H056289CK18/"},
+  {"id": "PL18-BLU", "name": "ピコタン・ロック 18", "size": "18", "color": "ブルー・アンダルー", "price": 242000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/picotin-lock-18-bag-H056289CK37/"},
+  {"id": "PL18-VRT", "name": "ピコタン・ロック 18", "size": "18", "color": "ヴェール・フォンセ", "price": 242000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/picotin-lock-18-bag-H056289CK64/"},
+  {"id": "PL18-GLD", "name": "ピコタン・ロック 18", "size": "18", "color": "ゴールド",     "price": 242000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/picotin-lock-18-bag-H056289CK77/"},
+
+  {"id": "PL22-NAT", "name": "ピコタン・ロック 22", "size": "22", "color": "ナチュラル",   "price": 286000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/picotin-lock-22-bag-H056290CK03/"},
+  {"id": "PL22-NOI", "name": "ピコタン・ロック 22", "size": "22", "color": "ノワール",     "price": 286000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/picotin-lock-22-bag-H056290CK89/"},
+  {"id": "PL22-RGH", "name": "ピコタン・ロック 22", "size": "22", "color": "ルージュ H",   "price": 286000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/picotin-lock-22-bag-H056290CK18/"},
+  {"id": "PL22-BLU", "name": "ピコタン・ロック 22", "size": "22", "color": "ブルー・アンダルー", "price": 286000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/picotin-lock-22-bag-H056290CK37/"},
+  {"id": "PL22-GLD", "name": "ピコタン・ロック 22", "size": "22", "color": "ゴールド",     "price": 286000, "tracked": true, "url": "https://www.hermes.com/jp/ja/product/picotin-lock-22-bag-H056290CK77/"}
+]
