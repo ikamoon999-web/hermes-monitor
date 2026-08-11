@@ -2,9 +2,8 @@ name: Hermès Stock Monitor
 
 on:
   schedule:
-    # Every 10 minutes (GitHub Actions minimum is 5 min)
-    # Note: for private repos, use */30 to stay within the 2,000 min/month free tier
-    - cron: "*/10 * * * *"
+    # Every 5 minutes (GitHub Actions minimum)
+    - cron: "*/5 * * * *"
   workflow_dispatch:   # Manual trigger from GitHub UI
 
 # Only one run at a time — prevent overlapping jobs
