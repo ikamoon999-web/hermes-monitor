@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 Hermès Japan Stock Monitor → Telegram Bot
-Uses Playwright (headless Chromium) to bypass Cloudflare bot detection.
 
 Required env vars:
   TELEGRAM_TOKEN   - Bot token from @BotFather
   TELEGRAM_CHAT_ID - Target channel / user / group ID
+
+Run on a self-hosted runner (home Mac) to avoid Cloudflare IP blocking
+that rejects GitHub-hosted runner (Azure) IPs with HTTP 403.
 """
 
 import json
@@ -24,42 +26,30 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 STATE_FILE   = "state.json"
 PRODUCT_FILE = "products.json"
-REQUEST_DELAY = 2   # seconds between product checks
-PAGE_TIMEOUT  = 30_000  # ms for Playwright page load
-JS_WAIT       = 3_000   # ms to wait for JS to render after DOMContentLoaded
+REQUEST_DELAY = 3   # seconds between product checks
+TIMEOUT       = 20
 
-# ── Browser fetch (Playwright) ──────────────────────────────────────────────────
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "Version/17.0 Mobile/15E148 Safari/604.1"
+    ),
+    "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Referer": "https://www.hermes.com/jp/ja/",
+}
 
-_browser = None  # shared Chromium instance for the run
-
+# ── Fetch ───────────────────────────────────────────────────────────────────────
 
 def fetch_html(url: str) -> str | None:
-    global _browser
     try:
-        ctx = _browser.new_context(
-            locale="ja-JP",
-            user_agent=(
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-                "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-                "Version/17.0 Mobile/15E148 Safari/604.1"
-            ),
-            extra_http_headers={
-                "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                "Referer": "https://www.hermes.com/jp/ja/",
-            },
-        )
-        page = ctx.new_page()
-        resp = page.goto(url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
-        if resp and resp.status != 200:
-            print(f"  HTTP {resp.status}", end=" ", flush=True)
-            ctx.close()
-            return None
-        page.wait_for_timeout(JS_WAIT)  # let Next.js hydrate and render stock status
-        html = page.content()
-        ctx.close()
-        return html
-    except Exception as e:
+        r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+        if r.status_code == 200:
+            return r.text
+        print(f"  HTTP {r.status_code}", end=" ", flush=True)
+        return None
+    except requests.RequestException as e:
         print(f"  fetch error: {e}", end=" ", flush=True)
         return None
 
@@ -75,16 +65,17 @@ def extract_og_image(html: str) -> str | None:
             return m.group(1)
     return None
 
+# ── Availability detection ──────────────────────────────────────────────────────
 
 def _check_next_data(html: str) -> bool | None:
-    """Parse Next.js __NEXT_DATA__ JSON. Returns True/False/None."""
+    """
+    Parse Next.js __NEXT_DATA__ SSR JSON embedded in the page.
+    Returns True/False if availability found, None if not present.
+    """
     m = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
     if not m:
         return None
-    try:
-        text = m.group(1)
-    except Exception:
-        return None
+    text = m.group(1)
 
     out_signals = ["OutOfStock", "out_of_stock", "outOfStock"]
     for s in out_signals:
@@ -100,10 +91,12 @@ def _check_next_data(html: str) -> bool | None:
 
 
 def is_in_stock(html: str) -> bool:
-    next_result = _check_next_data(html)
-    if next_result is not None:
-        return next_result
+    # Try Next.js SSR data first (Hermès JP is Next.js)
+    result = _check_next_data(html)
+    if result is not None:
+        return result
 
+    # Fallback: raw HTML patterns
     out_signals = [
         "OutOfStock",
         '"availability":"http://schema.org/OutOfStock"',
@@ -169,7 +162,7 @@ def send_notification(product: dict, image_url: str | None) -> bool:
             "caption":      caption,
             "parse_mode":   "HTML",
             "reply_markup": markup,
-        }, timeout=20)
+        }, timeout=TIMEOUT)
         if r.ok:
             print(f"  → Telegram photo sent ✓")
             return True
@@ -181,7 +174,7 @@ def send_notification(product: dict, image_url: str | None) -> bool:
         "parse_mode":               "HTML",
         "reply_markup":             markup,
         "disable_web_page_preview": False,
-    }, timeout=20)
+    }, timeout=TIMEOUT)
 
     if r.ok:
         print(f"  → Telegram message sent ✓")
@@ -196,7 +189,7 @@ def send_test_message() -> None:
         "chat_id":    CHAT_ID,
         "text":       "✅ <b>HWatch Bot 接続確認</b>\n\nエルメス在庫監視ボットが正常に動作しています。",
         "parse_mode": "HTML",
-    }, timeout=20)
+    }, timeout=TIMEOUT)
     if r.ok:
         print("Test message sent successfully!")
     else:
@@ -222,8 +215,6 @@ def save_state(state: dict) -> None:
 # ── Main ─────────────────────────────────────────────────────────────────────────
 
 def main():
-    global _browser
-
     if not TOKEN or not CHAT_ID:
         print("ERROR: TELEGRAM_TOKEN and TELEGRAM_CHAT_ID must be set.")
         sys.exit(1)
@@ -239,41 +230,35 @@ def main():
     print(f"Monitoring {len(tracked)} products at {_jst_now()}")
     print("=" * 48)
 
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        _browser = pw.chromium.launch(headless=True)
+    state   = load_state()
+    changed = False
 
-        state   = load_state()
-        changed = False
+    for i, p in enumerate(tracked):
+        print(f"[{i+1}/{len(tracked)}] {p['name']} {p['color']} …", end=" ", flush=True)
 
-        for i, p in enumerate(tracked):
-            print(f"[{i+1}/{len(tracked)}] {p['name']} {p['color']} …", end=" ", flush=True)
+        html = fetch_html(p["url"])
+        if html is None:
+            print("SKIP")
+            continue
 
-            html = fetch_html(p["url"])
-            if html is None:
-                print("SKIP")
-                continue
+        available     = is_in_stock(html)
+        prev          = state.get(p["id"], {})
+        was_available = prev.get("available", False)
 
-            available     = is_in_stock(html)
-            prev          = state.get(p["id"], {})
-            was_available = prev.get("available", False)
+        print("IN STOCK ✓" if available else "out of stock")
 
-            print("IN STOCK ✓" if available else "out of stock")
+        state.setdefault(p["id"], {})
+        state[p["id"]]["available"]    = available
+        state[p["id"]]["last_checked"] = datetime.utcnow().isoformat()
 
-            state.setdefault(p["id"], {})
-            state[p["id"]]["available"]    = available
-            state[p["id"]]["last_checked"] = datetime.utcnow().isoformat()
+        if available and not was_available:
+            image_url = extract_og_image(html)
+            send_notification(p, image_url)
+            state[p["id"]]["notified_at"] = datetime.utcnow().isoformat()
+            changed = True
 
-            if available and not was_available:
-                image_url = extract_og_image(html)
-                send_notification(p, image_url)
-                state[p["id"]]["notified_at"] = datetime.utcnow().isoformat()
-                changed = True
-
-            if i < len(tracked) - 1:
-                time.sleep(REQUEST_DELAY)
-
-        _browser.close()
+        if i < len(tracked) - 1:
+            time.sleep(REQUEST_DELAY)
 
     print("=" * 48)
     save_state(state)
