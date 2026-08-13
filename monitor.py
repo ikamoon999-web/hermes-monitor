@@ -65,9 +65,60 @@ def extract_og_image(html: str) -> str | None:
     return None
 
 
+def _check_next_data(html: str) -> bool | None:
+    """
+    Parse Next.js __NEXT_DATA__ JSON embedded in the page.
+    Returns True/False if availability is found, None if not present.
+    """
+    m = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(1))
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+    # Recursively search for availability-related keys in the JSON tree
+    text = json.dumps(data)
+
+    # Out-of-stock signals inside __NEXT_DATA__
+    out_signals = [
+        "OutOfStock",
+        "out_of_stock",
+        "outOfStock",
+        "isOutOfStock",
+    ]
+    for s in out_signals:
+        if f'"{s}"' in text or f': "{s}"' in text or f':{s}' in text.replace(' ', ''):
+            print(f"  [NEXT_DATA] out-of-stock signal: {s}", end=" ")
+            return False
+
+    # In-stock signals inside __NEXT_DATA__
+    in_signals = [
+        "InStock",
+        "in_stock",
+        "inStock",
+        "isInStock",
+        "カートに入れる",
+        "addToCart",
+        "add_to_cart",
+    ]
+    for s in in_signals:
+        if s in text:
+            print(f"  [NEXT_DATA] in-stock signal: {s}", end=" ")
+            return True
+
+    return None
+
+
 def is_in_stock(html: str) -> bool:
     """Return True if the product page indicates in-stock status."""
-    # Definitive out-of-stock signals — check first
+    # Try Next.js SSR data first (most reliable for Hermès JP)
+    next_result = _check_next_data(html)
+    if next_result is not None:
+        return next_result
+
+    # Definitive out-of-stock signals in raw HTML
     out_signals = [
         "OutOfStock",
         '"availability":"http://schema.org/OutOfStock"',
@@ -200,6 +251,34 @@ def main():
     # --test flag: verify bot connection and exit
     if "--test" in sys.argv:
         send_test_message()
+        return
+
+    # --debug flag: dump raw HTML for the first tracked product and exit
+    if "--debug" in sys.argv:
+        with open(PRODUCT_FILE, encoding="utf-8") as f:
+            products = json.load(f)
+        p = next((x for x in products if x.get("tracked", True)), None)
+        if not p:
+            print("No tracked products.")
+            return
+        print(f"Fetching: {p['url']}")
+        html = fetch_html(p["url"])
+        if html is None:
+            print("Fetch failed.")
+            return
+        # Print summary of what signals are found
+        print(f"HTML length: {len(html)} chars")
+        print(f"__NEXT_DATA__ present: {'__NEXT_DATA__' in html}")
+        print(f"OutOfStock in html: {'OutOfStock' in html}")
+        print(f"InStock in html: {'InStock' in html}")
+        print(f"カートに入れる in html: {'カートに入れる' in html}")
+        result = is_in_stock(html)
+        print(f"is_in_stock → {result}")
+        # Dump __NEXT_DATA__ snippet if present
+        m = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
+        if m:
+            snippet = m.group(1)[:2000]
+            print(f"\n__NEXT_DATA__ (first 2000 chars):\n{snippet}")
         return
 
     with open(PRODUCT_FILE, encoding="utf-8") as f:
