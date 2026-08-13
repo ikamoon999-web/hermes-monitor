@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Hermès Japan Stock Monitor → Telegram Bot
-Checks Hermès JP product pages and sends Telegram notifications on stock changes.
+Uses Playwright (headless Chromium) to bypass Cloudflare bot detection.
 
 Required env vars:
   TELEGRAM_TOKEN   - Bot token from @BotFather
@@ -24,36 +24,47 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 STATE_FILE   = "state.json"
 PRODUCT_FILE = "products.json"
-REQUEST_DELAY = 3   # seconds between product checks (be polite)
-TIMEOUT       = 20  # HTTP timeout in seconds
+REQUEST_DELAY = 2   # seconds between product checks
+PAGE_TIMEOUT  = 30_000  # ms for Playwright page load
+JS_WAIT       = 3_000   # ms to wait for JS to render after DOMContentLoaded
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-        "Version/17.0 Mobile/15E148 Safari/604.1"
-    ),
-    "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Referer": "https://www.hermes.com/jp/ja/",
-}
+# ── Browser fetch (Playwright) ──────────────────────────────────────────────────
 
-# ── Availability detection ──────────────────────────────────────────────────────
+_browser = None  # shared Chromium instance for the run
+
 
 def fetch_html(url: str) -> str | None:
+    global _browser
     try:
-        r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-        if r.status_code == 200:
-            return r.text
-        print(f"  HTTP {r.status_code}")
-        return None
-    except requests.RequestException as e:
-        print(f"  fetch error: {e}")
+        ctx = _browser.new_context(
+            locale="ja-JP",
+            user_agent=(
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                "Version/17.0 Mobile/15E148 Safari/604.1"
+            ),
+            extra_http_headers={
+                "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Referer": "https://www.hermes.com/jp/ja/",
+            },
+        )
+        page = ctx.new_page()
+        resp = page.goto(url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
+        if resp and resp.status != 200:
+            print(f"  HTTP {resp.status}", end=" ", flush=True)
+            ctx.close()
+            return None
+        page.wait_for_timeout(JS_WAIT)  # let Next.js hydrate and render stock status
+        html = page.content()
+        ctx.close()
+        return html
+    except Exception as e:
+        print(f"  fetch error: {e}", end=" ", flush=True)
         return None
 
 
 def extract_og_image(html: str) -> str | None:
-    """Extract og:image meta tag value for use as Telegram photo."""
     patterns = [
         r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
         r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
@@ -66,79 +77,49 @@ def extract_og_image(html: str) -> str | None:
 
 
 def _check_next_data(html: str) -> bool | None:
-    """
-    Parse Next.js __NEXT_DATA__ JSON embedded in the page.
-    Returns True/False if availability is found, None if not present.
-    """
+    """Parse Next.js __NEXT_DATA__ JSON. Returns True/False/None."""
     m = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
     if not m:
         return None
     try:
-        data = json.loads(m.group(1))
-    except (json.JSONDecodeError, ValueError):
+        text = m.group(1)
+    except Exception:
         return None
 
-    # Recursively search for availability-related keys in the JSON tree
-    text = json.dumps(data)
-
-    # Out-of-stock signals inside __NEXT_DATA__
-    out_signals = [
-        "OutOfStock",
-        "out_of_stock",
-        "outOfStock",
-        "isOutOfStock",
-    ]
+    out_signals = ["OutOfStock", "out_of_stock", "outOfStock"]
     for s in out_signals:
-        if f'"{s}"' in text or f': "{s}"' in text or f':{s}' in text.replace(' ', ''):
-            print(f"  [NEXT_DATA] out-of-stock signal: {s}", end=" ")
+        if s in text:
             return False
 
-    # In-stock signals inside __NEXT_DATA__
-    in_signals = [
-        "InStock",
-        "in_stock",
-        "inStock",
-        "isInStock",
-        "カートに入れる",
-        "addToCart",
-        "add_to_cart",
-    ]
+    in_signals = ["InStock", "in_stock", "inStock", "カートに入れる", "addToCart"]
     for s in in_signals:
         if s in text:
-            print(f"  [NEXT_DATA] in-stock signal: {s}", end=" ")
             return True
 
     return None
 
 
 def is_in_stock(html: str) -> bool:
-    """Return True if the product page indicates in-stock status."""
-    # Try Next.js SSR data first (most reliable for Hermès JP)
     next_result = _check_next_data(html)
     if next_result is not None:
         return next_result
 
-    # Definitive out-of-stock signals in raw HTML
     out_signals = [
         "OutOfStock",
         '"availability":"http://schema.org/OutOfStock"',
         '"availability": "http://schema.org/OutOfStock"',
         "product-not-available",
         "sold-out",
-        "data-sold-out",
         "在庫なし",
     ]
-    html_lower = html.lower()
     for s in out_signals:
-        if s.lower() in html_lower:
+        if s.lower() in html.lower():
             return False
 
-    # In-stock signals in JSON-LD structured data or page markup
     in_signals = [
         '"availability":"http://schema.org/InStock"',
         '"availability": "http://schema.org/InStock"',
         '"availability":"InStock"',
-        '"availability": "InStock"',
         "カートに入れる",
         "add-to-cart-button",
     ]
@@ -181,7 +162,6 @@ def send_notification(product: dict, image_url: str | None) -> bool:
     caption = _build_caption(product)
     markup  = _build_markup(product["url"])
 
-    # Try sending with photo first
     if image_url:
         r = requests.post(f"{TG_BASE}/sendPhoto", json={
             "chat_id":      CHAT_ID,
@@ -189,20 +169,19 @@ def send_notification(product: dict, image_url: str | None) -> bool:
             "caption":      caption,
             "parse_mode":   "HTML",
             "reply_markup": markup,
-        }, timeout=TIMEOUT)
+        }, timeout=20)
         if r.ok:
             print(f"  → Telegram photo sent ✓")
             return True
         print(f"  → sendPhoto failed ({r.status_code}), falling back to text")
 
-    # Fallback: text-only message with link preview
     r = requests.post(f"{TG_BASE}/sendMessage", json={
         "chat_id":                  CHAT_ID,
         "text":                     caption,
         "parse_mode":               "HTML",
         "reply_markup":             markup,
         "disable_web_page_preview": False,
-    }, timeout=TIMEOUT)
+    }, timeout=20)
 
     if r.ok:
         print(f"  → Telegram message sent ✓")
@@ -213,12 +192,11 @@ def send_notification(product: dict, image_url: str | None) -> bool:
 
 
 def send_test_message() -> None:
-    """Send a test message to verify bot + chat_id are working."""
     r = requests.post(f"{TG_BASE}/sendMessage", json={
         "chat_id":    CHAT_ID,
         "text":       "✅ <b>HWatch Bot 接続確認</b>\n\nエルメス在庫監視ボットが正常に動作しています。",
         "parse_mode": "HTML",
-    }, timeout=TIMEOUT)
+    }, timeout=20)
     if r.ok:
         print("Test message sent successfully!")
     else:
@@ -244,41 +222,14 @@ def save_state(state: dict) -> None:
 # ── Main ─────────────────────────────────────────────────────────────────────────
 
 def main():
+    global _browser
+
     if not TOKEN or not CHAT_ID:
         print("ERROR: TELEGRAM_TOKEN and TELEGRAM_CHAT_ID must be set.")
         sys.exit(1)
 
-    # --test flag: verify bot connection and exit
     if "--test" in sys.argv:
         send_test_message()
-        return
-
-    # --debug flag: dump raw HTML for the first tracked product and exit
-    if "--debug" in sys.argv:
-        with open(PRODUCT_FILE, encoding="utf-8") as f:
-            products = json.load(f)
-        p = next((x for x in products if x.get("tracked", True)), None)
-        if not p:
-            print("No tracked products.")
-            return
-        print(f"Fetching: {p['url']}")
-        html = fetch_html(p["url"])
-        if html is None:
-            print("Fetch failed.")
-            return
-        # Print summary of what signals are found
-        print(f"HTML length: {len(html)} chars")
-        print(f"__NEXT_DATA__ present: {'__NEXT_DATA__' in html}")
-        print(f"OutOfStock in html: {'OutOfStock' in html}")
-        print(f"InStock in html: {'InStock' in html}")
-        print(f"カートに入れる in html: {'カートに入れる' in html}")
-        result = is_in_stock(html)
-        print(f"is_in_stock → {result}")
-        # Dump __NEXT_DATA__ snippet if present
-        m = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
-        if m:
-            snippet = m.group(1)[:2000]
-            print(f"\n__NEXT_DATA__ (first 2000 chars):\n{snippet}")
         return
 
     with open(PRODUCT_FILE, encoding="utf-8") as f:
@@ -288,36 +239,41 @@ def main():
     print(f"Monitoring {len(tracked)} products at {_jst_now()}")
     print("=" * 48)
 
-    state   = load_state()
-    changed = False
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        _browser = pw.chromium.launch(headless=True)
 
-    for i, p in enumerate(tracked):
-        print(f"[{i+1}/{len(tracked)}] {p['name']} {p['color']} …", end=" ", flush=True)
+        state   = load_state()
+        changed = False
 
-        html = fetch_html(p["url"])
-        if html is None:
-            print("SKIP")
-            continue
+        for i, p in enumerate(tracked):
+            print(f"[{i+1}/{len(tracked)}] {p['name']} {p['color']} …", end=" ", flush=True)
 
-        available     = is_in_stock(html)
-        prev          = state.get(p["id"], {})
-        was_available = prev.get("available", False)
+            html = fetch_html(p["url"])
+            if html is None:
+                print("SKIP")
+                continue
 
-        print("IN STOCK ✓" if available else "out of stock")
+            available     = is_in_stock(html)
+            prev          = state.get(p["id"], {})
+            was_available = prev.get("available", False)
 
-        state.setdefault(p["id"], {})
-        state[p["id"]]["available"]    = available
-        state[p["id"]]["last_checked"] = datetime.utcnow().isoformat()
+            print("IN STOCK ✓" if available else "out of stock")
 
-        if available and not was_available:
-            # New stock detected — notify!
-            image_url = extract_og_image(html)
-            send_notification(p, image_url)
-            state[p["id"]]["notified_at"] = datetime.utcnow().isoformat()
-            changed = True
+            state.setdefault(p["id"], {})
+            state[p["id"]]["available"]    = available
+            state[p["id"]]["last_checked"] = datetime.utcnow().isoformat()
 
-        if i < len(tracked) - 1:
-            time.sleep(REQUEST_DELAY)
+            if available and not was_available:
+                image_url = extract_og_image(html)
+                send_notification(p, image_url)
+                state[p["id"]]["notified_at"] = datetime.utcnow().isoformat()
+                changed = True
+
+            if i < len(tracked) - 1:
+                time.sleep(REQUEST_DELAY)
+
+        _browser.close()
 
     print("=" * 48)
     save_state(state)
